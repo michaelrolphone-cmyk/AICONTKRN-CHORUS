@@ -29,6 +29,33 @@ def test_evolution_loop_updates_desires(tmp_path):
     assert session_log_path.exists()
 
 
+def test_evolution_loop_logs_progress_to_stdout(tmp_path, capsys):
+    desires_path = tmp_path / "desires.md"
+    desires_path.write_text("1) Start\nSeed.\n", encoding="utf-8")
+    ledger_path = tmp_path / "ledger.md"
+    state_path = tmp_path / "state.json"
+    session_log_path = tmp_path / "session.jsonl"
+
+    def completion_provider(_messages):
+        return '{"desires": "1) Next Step\\nAdvance.\\n"}'
+
+    run_evolution_loop(
+        desires_path,
+        ledger_path=ledger_path,
+        state_path=state_path,
+        session_log_path=session_log_path,
+        source="test",
+        interval=0.01,
+        max_iterations=1,
+        completion_provider=completion_provider,
+    )
+
+    output = capsys.readouterr().out
+    assert "Self-evolution loop started." in output
+    assert "Iteration 1 started." in output
+    assert "Iteration 1 completed with status=updated." in output
+
+
 def test_evolution_loop_rejects_invalid_response(tmp_path):
     desires_path = tmp_path / "desires.md"
     desires_path.write_text("1) Start\nSeed.\n", encoding="utf-8")
