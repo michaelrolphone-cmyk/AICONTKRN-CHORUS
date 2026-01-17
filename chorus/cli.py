@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Callable, Iterable
 
 from chorus.continuity import bootstrap_continuity
 from chorus.daemon import run_daemon
+from chorus.dialogue import run_dialogue_turn
 from chorus.evolution import run_evolution_loop
 from chorus.expansion import materialize_expansion
 
@@ -82,6 +84,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional bootstrap module path to reload each iteration.",
     )
 
+    dialogue = subparsers.add_parser(
+        "dialogue",
+        help="Send a message to CHORUS with continuity context via LM Studio.",
+    )
+    _add_common_paths(dialogue, include_session_log=True)
+    dialogue.add_argument("--source", required=True, help="Source label for ledger entries.")
+    dialogue.add_argument(
+        "--api-base",
+        default="http://localhost:1234",
+        help="LM Studio API base URL.",
+    )
+    dialogue.add_argument(
+        "--model",
+        default="local-model",
+        help="LM Studio model identifier.",
+    )
+    dialogue.add_argument(
+        "--capsule-path",
+        type=Path,
+        default=None,
+        help="Optional continuity capsule file path.",
+    )
+    dialogue.add_argument(
+        "--history-limit",
+        type=int,
+        default=12,
+        help="Max interaction records to include in the prompt.",
+    )
+    dialogue.add_argument("message", help="Message to send to CHORUS.")
+
     return parser
 
 
@@ -128,7 +160,11 @@ def _add_common_paths(parser: argparse.ArgumentParser, *, include_session_log: b
         )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    completion_provider: Callable[[Iterable[dict[str, str]]], str] | None = None,
+) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -183,6 +219,23 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             bootstrap_path=args.bootstrap,
         )
+        return 0
+
+    if args.command == "dialogue":
+        _require_paths(parser, args, include_session_log=True)
+        response = run_dialogue_turn(
+            args.message,
+            desires_path=args.desires_path,
+            ledger_path=args.ledger_path,
+            state_path=args.state_path,
+            session_log_path=args.session_log_path,
+            capsule_path=args.capsule_path,
+            history_limit=args.history_limit,
+            api_base=args.api_base,
+            model=args.model,
+            completion_provider=completion_provider,
+        )
+        print(response)
         return 0
 
     raise ValueError(f"Unhandled command: {args.command}")
