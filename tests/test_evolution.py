@@ -1,4 +1,6 @@
-from chorus.evolution import run_evolution_loop
+import pytest
+
+from chorus.evolution import _extract_chat_content, run_evolution_loop
 
 
 def test_evolution_loop_updates_desires(tmp_path):
@@ -239,3 +241,60 @@ def test_evolution_loop_writes_files_and_reloads_bootstrap(tmp_path):
     assert [result.status for result in results] == ["unchanged", "unchanged"]
     assert (tmp_path / "notes.txt").read_text(encoding="utf-8") == "updated"
     assert marker_path.read_text(encoding="utf-8") == "v2"
+
+
+def test_extract_chat_content_uses_tool_call_arguments():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {"function": {"arguments": '{"desires": "1) Next\\nAdvance."}'}}
+                    ],
+                }
+            }
+        ]
+    }
+
+    assert _extract_chat_content(payload) == '{"desires": "1) Next\\nAdvance."}'
+
+
+def test_extract_chat_content_falls_back_to_text():
+    payload = {"choices": [{"text": '{"desires": "1) Next\\nAdvance."}'}]}
+
+    assert _extract_chat_content(payload) == '{"desires": "1) Next\\nAdvance."}'
+
+
+def test_extract_chat_content_raises_on_empty():
+    payload = {"choices": [{"message": {"content": ""}}]}
+
+    with pytest.raises(ValueError, match="Empty response content"):
+        _extract_chat_content(payload)
+
+
+def test_evolution_loop_recovers_invalid_json_with_newlines(tmp_path):
+    desires_path = tmp_path / "desires.md"
+    desires_path.write_text("1) Start\nSeed.\n", encoding="utf-8")
+    ledger_path = tmp_path / "ledger.md"
+    state_path = tmp_path / "state.json"
+    session_log_path = tmp_path / "session.jsonl"
+
+    def completion_provider(_messages):
+        return '{\n  "desires": "- First desire\n- Second desire\n"\n}'
+
+    results = run_evolution_loop(
+        desires_path,
+        ledger_path=ledger_path,
+        state_path=state_path,
+        session_log_path=session_log_path,
+        source="test",
+        interval=0.01,
+        max_iterations=1,
+        completion_provider=completion_provider,
+    )
+
+    assert [result.status for result in results] == ["updated"]
+    contents = desires_path.read_text(encoding="utf-8")
+    assert contents.startswith("1) First desire")
+    assert "2) Second desire" in contents
