@@ -27,6 +27,22 @@ def test_record_and_load_interactions(tmp_path):
     assert records[0].ts == clock.isoformat()
 
 
+def test_record_interaction_normalizes_empty_content(tmp_path):
+    clock = datetime(2026, 1, 6, tzinfo=timezone.utc)
+    log_path = tmp_path / "session.jsonl"
+
+    record_interaction(
+        log_path,
+        role="assistant",
+        content="",
+        clock=clock,
+    )
+
+    records = load_interactions(log_path)
+
+    assert records[0].content == "[empty]"
+
+
 def test_bootstrap_continuity(tmp_path):
     clock = datetime(2026, 1, 7, tzinfo=timezone.utc)
     desires_path = tmp_path / "desires.md"

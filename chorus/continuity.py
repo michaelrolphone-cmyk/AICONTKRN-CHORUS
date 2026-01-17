@@ -32,9 +32,12 @@ def record_interaction(
     content: str,
     clock: datetime | None = None,
 ) -> InteractionRecord:
+    normalized_content = content
+    if not content or not content.strip():
+        normalized_content = "[empty]"
     if clock is None:
         clock = datetime.now(timezone.utc)
-    record = InteractionRecord(ts=clock.isoformat(), role=role, content=content)
+    record = InteractionRecord(ts=clock.isoformat(), role=role, content=normalized_content)
     record.validate()
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)

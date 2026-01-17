@@ -68,9 +68,15 @@ def run_evolution_loop(
             f"Model={config.model}, API={_normalize_api_base(config.api_base)}."
         ),
     )
+    print(
+        "Self-evolution loop started. "
+        f"Model={config.model}, API={_normalize_api_base(config.api_base)}.",
+        flush=True,
+    )
 
     while True:
         iteration += 1
+        print(f"Iteration {iteration} started.", flush=True)
         _maybe_run_bootstrap(
             bootstrap_path,
             iteration=iteration,
@@ -101,6 +107,7 @@ def run_evolution_loop(
                 role="system",
                 content=f"Evolution loop error: {exc}",
             )
+            print(f"Iteration {iteration} error: {exc}", flush=True)
             results.append(
                 EvolutionResult(
                     iteration=iteration,
@@ -129,6 +136,7 @@ def run_evolution_loop(
                     status=status,
                 )
             )
+            print(f"Iteration {iteration} completed with status={status}.", flush=True)
 
         if max_iterations is not None and iteration >= max_iterations:
             return results
