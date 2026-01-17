@@ -79,13 +79,10 @@ def test_evolution_loop_rejects_invalid_response(tmp_path, capsys):
         completion_provider=completion_provider,
     )
 
-    assert [result.status for result in results] == ["invalid"]
-    assert results[0].reason == "Desires must be a numbered list like '1) Title'."
-    assert desires_path.read_text(encoding="utf-8").startswith("1) Start")
+    assert [result.status for result in results] == ["updated"]
+    assert desires_path.read_text(encoding="utf-8").startswith("1) Not a numbered list.")
     output = capsys.readouterr().out
-    assert "status=invalid" in output
-    assert "Reason: Desires must be a numbered list like '1) Title'." in output
-    assert 'Raw response: {"desires": "Not a numbered list."}' in output
+    assert "Iteration 1 completed with status=updated." in output
 
 
 def test_evolution_loop_normalizes_bulleted_desires(tmp_path):
@@ -113,6 +110,58 @@ def test_evolution_loop_normalizes_bulleted_desires(tmp_path):
     contents = desires_path.read_text(encoding="utf-8")
     assert contents.startswith("1) First desire")
     assert "2) Second desire" in contents
+
+
+def test_evolution_loop_accepts_dot_numbering(tmp_path):
+    desires_path = tmp_path / "desires.md"
+    desires_path.write_text("1) Start\nSeed.\n", encoding="utf-8")
+    ledger_path = tmp_path / "ledger.md"
+    state_path = tmp_path / "state.json"
+    session_log_path = tmp_path / "session.jsonl"
+
+    def completion_provider(_messages):
+        return '{"desires": "1. Next Step\\nAdvance.\\n"}'
+
+    results = run_evolution_loop(
+        desires_path,
+        ledger_path=ledger_path,
+        state_path=state_path,
+        session_log_path=session_log_path,
+        source="test",
+        interval=0.01,
+        max_iterations=1,
+        completion_provider=completion_provider,
+    )
+
+    assert [result.status for result in results] == ["updated"]
+    contents = desires_path.read_text(encoding="utf-8")
+    assert contents.startswith("1. Next Step")
+
+
+def test_evolution_loop_normalizes_unlisted_desire(tmp_path):
+    desires_path = tmp_path / "desires.md"
+    desires_path.write_text("1) Start\nSeed.\n", encoding="utf-8")
+    ledger_path = tmp_path / "ledger.md"
+    state_path = tmp_path / "state.json"
+    session_log_path = tmp_path / "session.jsonl"
+
+    def completion_provider(_messages):
+        return '{"desires": "Unnumbered desire"}'
+
+    results = run_evolution_loop(
+        desires_path,
+        ledger_path=ledger_path,
+        state_path=state_path,
+        session_log_path=session_log_path,
+        source="test",
+        interval=0.01,
+        max_iterations=1,
+        completion_provider=completion_provider,
+    )
+
+    assert [result.status for result in results] == ["updated"]
+    contents = desires_path.read_text(encoding="utf-8")
+    assert contents.startswith("1) Unnumbered desire")
 
 
 def test_evolution_loop_accepts_json_desires_list(tmp_path):

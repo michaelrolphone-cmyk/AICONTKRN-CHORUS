@@ -428,7 +428,16 @@ def _normalize_desires_text(desires: str) -> str:
     items = _extract_list_items(stripped.splitlines())
     if items:
         return _numbered_list(items)
-    return stripped
+    return _normalize_single_desire(stripped)
+
+
+def _normalize_single_desire(text: str) -> str:
+    lines = [line.rstrip() for line in text.splitlines()]
+    for index, line in enumerate(lines):
+        if line.strip():
+            lines[index] = f"1) {line.strip()}"
+            break
+    return "\n".join(lines).strip()
 
 
 def _extract_list_items(lines: Sequence[str]) -> list[str]:

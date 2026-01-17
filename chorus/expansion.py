@@ -27,7 +27,7 @@ def parse_desires(text: str) -> list[Desire]:
             if current and current["body_lines"]:
                 current["body_lines"].append("")
             continue
-        match = re.match(r"^(\d+)\)\s+(.*)$", stripped)
+        match = re.match(r"^(\d+)[\).]\s+(.*)$", stripped)
         if match:
             if current:
                 desires.append(_finalize_desire(current))
