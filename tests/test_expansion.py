@@ -28,6 +28,18 @@ Ledger-first growth: keep all new knowledge as append-only entries.
     assert "resonance graph weights" in desires[1].body
 
 
+def test_parse_desires_accepts_dot_numbering():
+    text = """1. Deterministic Pipeline Growth
+Linear-time transforms only.
+"""
+    desires = parse_desires(text)
+
+    assert len(desires) == 1
+    assert desires[0].index == 1
+    assert desires[0].title == "Deterministic Pipeline Growth"
+    assert "Linear-time transforms only." in desires[0].body
+
+
 def test_expand_from_desires_file(tmp_path):
     clock = datetime(2026, 1, 3, tzinfo=timezone.utc)
     desires_file = tmp_path / "desires.md"
