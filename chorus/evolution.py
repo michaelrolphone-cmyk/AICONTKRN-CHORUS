@@ -196,10 +196,34 @@ def call_lm_studio_chat(config: LmStudioConfig, messages: Iterable[dict[str, str
     )
     with request.urlopen(req, timeout=config.timeout) as response:
         data = json.loads(response.read().decode("utf-8"))
+    return _extract_chat_content(data)
+
+
+def _extract_chat_content(data: dict[str, object]) -> str:
     try:
-        return data["choices"][0]["message"]["content"].strip()
+        choice = data["choices"][0]
     except (KeyError, IndexError, TypeError) as exc:
         raise ValueError("Unexpected response format from LM Studio") from exc
+    if not isinstance(choice, dict):
+        raise ValueError("Unexpected response format from LM Studio")
+    message = choice.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            first_call = tool_calls[0]
+            if isinstance(first_call, dict):
+                function = first_call.get("function")
+                if isinstance(function, dict):
+                    arguments = function.get("arguments")
+                    if isinstance(arguments, str) and arguments.strip():
+                        return arguments.strip()
+    text = choice.get("text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    raise ValueError("Empty response content from LM Studio")
 
 
 def _build_messages(

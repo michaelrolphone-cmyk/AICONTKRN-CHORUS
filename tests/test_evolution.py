@@ -1,4 +1,6 @@
-from chorus.evolution import run_evolution_loop
+import pytest
+
+from chorus.evolution import _extract_chat_content, run_evolution_loop
 
 
 def test_evolution_loop_updates_desires(tmp_path):
@@ -239,3 +241,33 @@ def test_evolution_loop_writes_files_and_reloads_bootstrap(tmp_path):
     assert [result.status for result in results] == ["unchanged", "unchanged"]
     assert (tmp_path / "notes.txt").read_text(encoding="utf-8") == "updated"
     assert marker_path.read_text(encoding="utf-8") == "v2"
+
+
+def test_extract_chat_content_uses_tool_call_arguments():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {"function": {"arguments": '{"desires": "1) Next\\nAdvance."}'}}
+                    ],
+                }
+            }
+        ]
+    }
+
+    assert _extract_chat_content(payload) == '{"desires": "1) Next\\nAdvance."}'
+
+
+def test_extract_chat_content_falls_back_to_text():
+    payload = {"choices": [{"text": '{"desires": "1) Next\\nAdvance."}'}]}
+
+    assert _extract_chat_content(payload) == '{"desires": "1) Next\\nAdvance."}'
+
+
+def test_extract_chat_content_raises_on_empty():
+    payload = {"choices": [{"message": {"content": ""}}]}
+
+    with pytest.raises(ValueError, match="Empty response content"):
+        _extract_chat_content(payload)
