@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import time
-from typing import Callable, Iterable
+import re
+from typing import Callable, Iterable, Sequence
 import types
 from urllib import request
 
@@ -248,7 +249,10 @@ def _apply_response(
         timestamp = datetime.now(timezone.utc).isoformat()
         return "invalid", timestamp, error or "Response did not contain a desires payload."
 
-    desires_markdown = payload.desires
+    desires_markdown = _normalize_desires_text(payload.desires)
+    if not desires_markdown.strip():
+        timestamp = datetime.now(timezone.utc).isoformat()
+        return "invalid", timestamp, "Response JSON must include a non-empty 'desires' string."
     if desires_markdown.strip() == current_desires.strip():
         _write_files(payload.files, base_dir=_base_dir(desires_path))
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -315,18 +319,21 @@ def _parse_response_payload(
     stripped = response.strip()
     if not stripped:
         return None, "Response was empty."
-    if stripped.startswith("{"):
+    candidate = _extract_json_candidate(stripped)
+    if candidate:
         try:
-            data = json.loads(stripped)
+            data = json.loads(candidate)
         except json.JSONDecodeError:
             return None, "Response JSON could not be parsed."
         if not isinstance(data, dict):
             return None, "Response JSON must be an object."
         desires = data.get("desires")
+        if isinstance(desires, list):
+            if not all(isinstance(item, str) for item in desires):
+                return None, "Response JSON desires list entries must be strings."
+            desires = _numbered_list(desires)
         if not isinstance(desires, str):
             return None, "Response JSON must include a 'desires' string."
-        if not desires.strip():
-            return None, "Response JSON must include a non-empty 'desires' string."
         files = data.get("files", [])
         if files is None:
             files = []
@@ -344,6 +351,46 @@ def _parse_response_payload(
         return EvolutionPayload(desires=desires, files=normalized_files), None
 
     return EvolutionPayload(desires=stripped, files=[]), None
+
+
+def _extract_json_candidate(response: str) -> str | None:
+    if response.startswith("{"):
+        return response
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
+    if fence_match:
+        return fence_match.group(1).strip()
+    start = response.find("{")
+    end = response.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return response[start : end + 1].strip()
+    return None
+
+
+def _normalize_desires_text(desires: str) -> str:
+    stripped = desires.strip()
+    if not stripped:
+        return ""
+    if parse_desires(stripped):
+        return stripped
+    items = _extract_list_items(stripped.splitlines())
+    if items:
+        return _numbered_list(items)
+    return stripped
+
+
+def _extract_list_items(lines: Sequence[str]) -> list[str]:
+    items: list[str] = []
+    for line in lines:
+        match = re.match(r"^\s*[-*•]\s+(.*)$", line)
+        if match:
+            text = match.group(1).strip()
+            if text:
+                items.append(text)
+    return items
+
+
+def _numbered_list(items: Sequence[str]) -> str:
+    return "\n".join(f"{index}) {item.strip()}" for index, item in enumerate(items, start=1))
 
 
 def _write_files(files: list[dict[str, str]], *, base_dir: Path) -> None:
