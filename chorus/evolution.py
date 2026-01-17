@@ -348,6 +348,9 @@ def _parse_response_payload(
         try:
             data = json.loads(candidate)
         except json.JSONDecodeError:
+            recovered = _recover_payload_from_invalid_json(candidate)
+            if recovered is not None:
+                return recovered, None
             return None, "Response JSON could not be parsed."
         if not isinstance(data, dict):
             return None, "Response JSON must be an object."
@@ -388,6 +391,32 @@ def _extract_json_candidate(response: str) -> str | None:
     if start != -1 and end != -1 and end > start:
         return response[start : end + 1].strip()
     return None
+
+
+def _recover_payload_from_invalid_json(response: str) -> EvolutionPayload | None:
+    desires_text = _recover_desires_text(response)
+    if desires_text:
+        return EvolutionPayload(desires=desires_text, files=[])
+    return None
+
+
+def _recover_desires_text(response: str) -> str | None:
+    match = re.search(r'"desires"\s*:\s*"(.*)', response, re.DOTALL)
+    if not match:
+        return None
+    raw = match.group(1).rstrip()
+    raw = re.sub(r'"\s*[,}]?\s*$', "", raw)
+    raw = raw.strip()
+    if not raw:
+        return None
+    normalized = (
+        raw.replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\r", "\r")
+        .replace('\\"', '"')
+        .replace("\\\\", "\\")
+    )
+    return normalized.strip() or None
 
 
 def _normalize_desires_text(desires: str) -> str:
