@@ -1,0 +1,345 @@
+"""Self-evolution loop powered by LM Studio's API."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import time
+from typing import Callable, Iterable
+import types
+from urllib import request
+
+from chorus.continuity import record_interaction
+from chorus.expansion import materialize_expansion, parse_desires
+
+
+@dataclass(frozen=True)
+class LmStudioConfig:
+    api_base: str
+    model: str
+    temperature: float = 0.7
+    max_tokens: int = 512
+    timeout: float = 30.0
+
+
+@dataclass(frozen=True)
+class EvolutionResult:
+    iteration: int
+    timestamp: str
+    status: str
+
+
+def run_evolution_loop(
+    desires_path: str | Path,
+    *,
+    ledger_path: str | Path,
+    state_path: str | Path,
+    session_log_path: str | Path,
+    source: str,
+    api_base: str = "http://localhost:1234",
+    model: str = "local-model",
+    temperature: float = 0.7,
+    max_tokens: int = 512,
+    interval: float = 60.0,
+    max_iterations: int | None = None,
+    bootstrap_path: str | Path | None = None,
+    completion_provider: Callable[[list[dict[str, str]]], str] | None = None,
+) -> list[EvolutionResult]:
+    if interval <= 0:
+        raise ValueError("Interval must be positive")
+    iteration = 0
+    results: list[EvolutionResult] = []
+    config = LmStudioConfig(
+        api_base=api_base,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    if completion_provider is None:
+        completion_provider = lambda messages: call_lm_studio_chat(config, messages)
+
+    record_interaction(
+        session_log_path,
+        role="system",
+        content=(
+            "Self-evolution loop started. "
+            f"Model={config.model}, API={_normalize_api_base(config.api_base)}."
+        ),
+    )
+
+    while True:
+        iteration += 1
+        _maybe_run_bootstrap(
+            bootstrap_path,
+            iteration=iteration,
+            desires_path=desires_path,
+            ledger_path=ledger_path,
+            state_path=state_path,
+            session_log_path=session_log_path,
+            source=source,
+        )
+        current_desires = _read_text(desires_path)
+        messages = _build_messages(
+            current_desires,
+            ledger_path=ledger_path,
+            state_path=state_path,
+        )
+        record_interaction(
+            session_log_path,
+            role="user",
+            content=messages[-1]["content"],
+        )
+
+        try:
+            response = completion_provider(messages)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            timestamp = datetime.now(timezone.utc).isoformat()
+            record_interaction(
+                session_log_path,
+                role="system",
+                content=f"Evolution loop error: {exc}",
+            )
+            results.append(
+                EvolutionResult(
+                    iteration=iteration,
+                    timestamp=timestamp,
+                    status="error",
+                )
+            )
+        else:
+            record_interaction(
+                session_log_path,
+                role="assistant",
+                content=response,
+            )
+            status, timestamp = _apply_response(
+                response,
+                current_desires=current_desires,
+                desires_path=desires_path,
+                ledger_path=ledger_path,
+                state_path=state_path,
+                source=source,
+            )
+            results.append(
+                EvolutionResult(
+                    iteration=iteration,
+                    timestamp=timestamp,
+                    status=status,
+                )
+            )
+
+        if max_iterations is not None and iteration >= max_iterations:
+            return results
+        time.sleep(interval)
+
+
+def call_lm_studio_chat(config: LmStudioConfig, messages: Iterable[dict[str, str]]) -> str:
+    payload = json.dumps(
+        {
+            "model": config.model,
+            "messages": list(messages),
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens,
+        }
+    ).encode("utf-8")
+    target = f"{_normalize_api_base(config.api_base)}/v1/chat/completions"
+    req = request.Request(
+        target,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with request.urlopen(req, timeout=config.timeout) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    try:
+        return data["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("Unexpected response format from LM Studio") from exc
+
+
+def _build_messages(
+    current_desires: str,
+    *,
+    ledger_path: str | Path,
+    state_path: str | Path,
+) -> list[dict[str, str]]:
+    ledger_excerpt = _read_tail_lines(ledger_path, limit=5)
+    state_payload = _read_json(state_path)
+    user_content = (
+        "Current desires markdown:\n"
+        f"{current_desires or '[none]'}\n\n"
+        "Recent ledger entries (most recent last):\n"
+        f"{ledger_excerpt or '[none]'}\n\n"
+        "Current state snapshot JSON:\n"
+        f"{json.dumps(state_payload, indent=2, sort_keys=True) if state_payload else '[none]'}\n\n"
+        "Update the desires markdown to reflect the next self-evolution steps. "
+        "Return ONLY valid JSON with keys: "
+        "`desires` (string markdown list) and optional `files` (list of "
+        "{path, content} objects). Use paths relative to the desires file "
+        "directory. Do not include commentary or code fences."
+    )
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are CHORUS running a self-evolution loop. "
+                "Rewrite the desires list to guide the next iteration."
+            ),
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
+def _apply_response(
+    response: str,
+    *,
+    current_desires: str,
+    desires_path: str | Path,
+    ledger_path: str | Path,
+    state_path: str | Path,
+    source: str,
+) -> tuple[str, str]:
+    payload = _parse_response_payload(response)
+    if payload is None:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        return "invalid", timestamp
+
+    desires_markdown = payload.desires
+    if desires_markdown.strip() == current_desires.strip():
+        _write_files(payload.files, base_dir=_base_dir(desires_path))
+        timestamp = datetime.now(timezone.utc).isoformat()
+        return "unchanged", timestamp
+
+    try:
+        desires = parse_desires(desires_markdown)
+    except Exception:
+        desires = []
+    if not desires:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        return "invalid", timestamp
+
+    Path(desires_path).write_text(desires_markdown.strip() + "\n", encoding="utf-8")
+    _write_files(payload.files, base_dir=_base_dir(desires_path))
+    _, snapshot = materialize_expansion(
+        desires_path,
+        ledger_path=ledger_path,
+        state_path=state_path,
+        source=source,
+    )
+    return "updated", snapshot.timestamp
+
+
+def _read_text(path: str | Path) -> str:
+    file_path = Path(path)
+    if not file_path.exists():
+        return ""
+    return file_path.read_text(encoding="utf-8").strip()
+
+
+def _read_tail_lines(path: str | Path, *, limit: int) -> str:
+    file_path = Path(path)
+    if not file_path.exists():
+        return ""
+    lines = file_path.read_text(encoding="utf-8").splitlines()
+    return "\n".join(lines[-limit:])
+
+
+def _read_json(path: str | Path) -> dict[str, object] | None:
+    file_path = Path(path)
+    if not file_path.exists():
+        return None
+    return json.loads(file_path.read_text(encoding="utf-8"))
+
+
+def _normalize_api_base(api_base: str) -> str:
+    return api_base.rstrip("/")
+
+
+@dataclass(frozen=True)
+class EvolutionPayload:
+    desires: str
+    files: list[dict[str, str]]
+
+
+def _parse_response_payload(response: str) -> EvolutionPayload | None:
+    stripped = response.strip()
+    if not stripped:
+        return None
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        desires = data.get("desires")
+        if not isinstance(desires, str):
+            return None
+        files = data.get("files", [])
+        if files is None:
+            files = []
+        if not isinstance(files, list):
+            return None
+        normalized_files: list[dict[str, str]] = []
+        for item in files:
+            if not isinstance(item, dict):
+                return None
+            path = item.get("path")
+            content = item.get("content")
+            if not isinstance(path, str) or not isinstance(content, str):
+                return None
+            normalized_files.append({"path": path, "content": content})
+        return EvolutionPayload(desires=desires, files=normalized_files)
+
+    return EvolutionPayload(desires=stripped, files=[])
+
+
+def _write_files(files: list[dict[str, str]], *, base_dir: Path) -> None:
+    for item in files:
+        relative_path = item["path"]
+        content = item["content"]
+        destination = (base_dir / relative_path).resolve()
+        if base_dir not in destination.parents and destination != base_dir:
+            raise ValueError(f"Refusing to write outside base directory: {relative_path}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+
+
+def _base_dir(desires_path: str | Path) -> Path:
+    return Path(desires_path).resolve().parent
+
+
+def _maybe_run_bootstrap(
+    bootstrap_path: str | Path | None,
+    *,
+    iteration: int,
+    desires_path: str | Path,
+    ledger_path: str | Path,
+    state_path: str | Path,
+    session_log_path: str | Path,
+    source: str,
+) -> None:
+    if bootstrap_path is None:
+        return
+    path = Path(bootstrap_path)
+    if not path.exists():
+        return
+    module_name = f"chorus_bootstrap_{iteration}"
+    module = types.ModuleType(module_name)
+    source = path.read_text(encoding="utf-8")
+    exec(compile(source, str(path), "exec"), module.__dict__)
+    bootstrap = getattr(module, "bootstrap", None)
+    if not callable(bootstrap):
+        raise ValueError("Bootstrap module must define a callable 'bootstrap' function")
+    context = {
+        "iteration": iteration,
+        "desires_path": str(desires_path),
+        "ledger_path": str(ledger_path),
+        "state_path": str(state_path),
+        "session_log_path": str(session_log_path),
+        "source": source,
+        "base_dir": str(_base_dir(desires_path)),
+    }
+    bootstrap(context)

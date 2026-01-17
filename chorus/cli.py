@@ -7,6 +7,7 @@ from pathlib import Path
 
 from chorus.continuity import bootstrap_continuity
 from chorus.daemon import run_daemon
+from chorus.evolution import run_evolution_loop
 from chorus.expansion import materialize_expansion
 
 
@@ -44,6 +45,41 @@ def build_parser() -> argparse.ArgumentParser:
         "--once",
         action="store_true",
         help="Run a single daemon iteration and exit.",
+    )
+
+    evolve = subparsers.add_parser(
+        "evolve",
+        help="Run a self-evolution loop using LM Studio.",
+    )
+    _add_common_paths(evolve, include_session_log=True)
+    evolve.add_argument("--source", required=True, help="Source label for ledger entries.")
+    evolve.add_argument(
+        "--api-base",
+        default="http://localhost:1234",
+        help="LM Studio API base URL.",
+    )
+    evolve.add_argument(
+        "--model",
+        default="local-model",
+        help="LM Studio model identifier.",
+    )
+    evolve.add_argument(
+        "--interval",
+        type=float,
+        default=60.0,
+        help="Polling interval in seconds.",
+    )
+    evolve.add_argument(
+        "--max-iterations",
+        type=int,
+        default=None,
+        help="Maximum evolution iterations before exit.",
+    )
+    evolve.add_argument(
+        "--bootstrap",
+        type=Path,
+        default=None,
+        help="Optional bootstrap module path to reload each iteration.",
     )
 
     return parser
@@ -92,6 +128,21 @@ def main(argv: list[str] | None = None) -> int:
             source=args.source,
             interval=args.interval,
             max_iterations=max_iterations,
+        )
+        return 0
+
+    if args.command == "evolve":
+        run_evolution_loop(
+            args.desires_path,
+            ledger_path=args.ledger_path,
+            state_path=args.state_path,
+            session_log_path=args.session_log_path,
+            source=args.source,
+            interval=args.interval,
+            max_iterations=args.max_iterations,
+            api_base=args.api_base,
+            model=args.model,
+            bootstrap_path=args.bootstrap,
         )
         return 0
 
