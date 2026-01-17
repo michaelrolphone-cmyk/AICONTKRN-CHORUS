@@ -1,4 +1,5 @@
 from chorus.cli import main
+from chorus.evolution import LmStudioRequestError
 
 
 def test_cli_expand(tmp_path, capsys):
@@ -105,3 +106,32 @@ def test_cli_dialogue(tmp_path, capsys):
     assert result == 0
     assert "Hello from CHORUS" in captured.out
     assert session_log_path.exists()
+
+
+def test_cli_dialogue_handles_lm_studio_error(tmp_path, capsys):
+    desires_path = tmp_path / "desires.md"
+    desires_path.write_text("1) Continuity\nSteady.\n", encoding="utf-8")
+    ledger_path = tmp_path / "ledger.md"
+    state_path = tmp_path / "state.json"
+    session_log_path = tmp_path / "session.jsonl"
+
+    def completion_provider(_messages):
+        raise LmStudioRequestError("LM Studio request failed.")
+
+    result = main(
+        [
+            "dialogue",
+            str(desires_path),
+            str(ledger_path),
+            str(state_path),
+            str(session_log_path),
+            "Hello",
+            "--source",
+            "test",
+        ],
+        completion_provider=completion_provider,
+    )
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "LM Studio request failed." in captured.err
