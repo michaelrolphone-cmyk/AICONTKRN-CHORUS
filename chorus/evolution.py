@@ -29,6 +29,7 @@ class EvolutionResult:
     iteration: int
     timestamp: str
     status: str
+    reason: str | None = None
 
 
 def run_evolution_loop(
@@ -98,16 +99,27 @@ def run_evolution_loop(
             content=messages[-1]["content"],
         )
 
+        response_text: str | None = None
         try:
             response = completion_provider(messages)
+            response_text = response
         except Exception as exc:  # pragma: no cover - defensive logging
             timestamp = datetime.now(timezone.utc).isoformat()
             record_interaction(
                 session_log_path,
                 role="system",
-                content=f"Evolution loop error: {exc}",
+                content=(
+                    "Evolution loop error: "
+                    f"{exc} Raw response: {response_text or '[none]'}"
+                ),
             )
-            print(f"Iteration {iteration} error: {exc}", flush=True)
+            print(
+                (
+                    f"Iteration {iteration} error: {exc}. "
+                    f"Raw response: {response_text or '[none]'}"
+                ),
+                flush=True,
+            )
             results.append(
                 EvolutionResult(
                     iteration=iteration,
@@ -121,7 +133,7 @@ def run_evolution_loop(
                 role="assistant",
                 content=response,
             )
-            status, timestamp = _apply_response(
+            status, timestamp, reason = _apply_response(
                 response,
                 current_desires=current_desires,
                 desires_path=desires_path,
@@ -134,9 +146,31 @@ def run_evolution_loop(
                     iteration=iteration,
                     timestamp=timestamp,
                     status=status,
+                    reason=reason,
                 )
             )
-            print(f"Iteration {iteration} completed with status={status}.", flush=True)
+            if status == "invalid":
+                record_interaction(
+                    session_log_path,
+                    role="system",
+                    content=f"Evolution loop raw response: {response_text}",
+                )
+                print(f"Raw response: {response_text}", flush=True)
+            if reason:
+                record_interaction(
+                    session_log_path,
+                    role="system",
+                    content=f"Evolution loop status={status}. Reason: {reason}",
+                )
+                print(
+                    f"Iteration {iteration} completed with status={status}. Reason: {reason}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"Iteration {iteration} completed with status={status}.",
+                    flush=True,
+                )
 
         if max_iterations is not None and iteration >= max_iterations:
             return results
@@ -208,17 +242,17 @@ def _apply_response(
     ledger_path: str | Path,
     state_path: str | Path,
     source: str,
-) -> tuple[str, str]:
-    payload = _parse_response_payload(response)
+) -> tuple[str, str, str | None]:
+    payload, error = _parse_response_payload(response)
     if payload is None:
         timestamp = datetime.now(timezone.utc).isoformat()
-        return "invalid", timestamp
+        return "invalid", timestamp, error or "Response did not contain a desires payload."
 
     desires_markdown = payload.desires
     if desires_markdown.strip() == current_desires.strip():
         _write_files(payload.files, base_dir=_base_dir(desires_path))
         timestamp = datetime.now(timezone.utc).isoformat()
-        return "unchanged", timestamp
+        return "unchanged", timestamp, None
 
     try:
         desires = parse_desires(desires_markdown)
@@ -226,7 +260,11 @@ def _apply_response(
         desires = []
     if not desires:
         timestamp = datetime.now(timezone.utc).isoformat()
-        return "invalid", timestamp
+        return (
+            "invalid",
+            timestamp,
+            "Desires must be a numbered list like '1) Title'.",
+        )
 
     Path(desires_path).write_text(desires_markdown.strip() + "\n", encoding="utf-8")
     _write_files(payload.files, base_dir=_base_dir(desires_path))
@@ -236,7 +274,7 @@ def _apply_response(
         state_path=state_path,
         source=source,
     )
-    return "updated", snapshot.timestamp
+    return "updated", snapshot.timestamp, None
 
 
 def _read_text(path: str | Path) -> str:
@@ -271,37 +309,41 @@ class EvolutionPayload:
     files: list[dict[str, str]]
 
 
-def _parse_response_payload(response: str) -> EvolutionPayload | None:
+def _parse_response_payload(
+    response: str,
+) -> tuple[EvolutionPayload | None, str | None]:
     stripped = response.strip()
     if not stripped:
-        return None
+        return None, "Response was empty."
     if stripped.startswith("{"):
         try:
             data = json.loads(stripped)
         except json.JSONDecodeError:
-            return None
+            return None, "Response JSON could not be parsed."
         if not isinstance(data, dict):
-            return None
+            return None, "Response JSON must be an object."
         desires = data.get("desires")
         if not isinstance(desires, str):
-            return None
+            return None, "Response JSON must include a 'desires' string."
+        if not desires.strip():
+            return None, "Response JSON must include a non-empty 'desires' string."
         files = data.get("files", [])
         if files is None:
             files = []
         if not isinstance(files, list):
-            return None
+            return None, "Response JSON 'files' must be a list."
         normalized_files: list[dict[str, str]] = []
         for item in files:
             if not isinstance(item, dict):
-                return None
+                return None, "Each file entry must be an object."
             path = item.get("path")
             content = item.get("content")
             if not isinstance(path, str) or not isinstance(content, str):
-                return None
+                return None, "Each file entry must include string 'path' and 'content'."
             normalized_files.append({"path": path, "content": content})
-        return EvolutionPayload(desires=desires, files=normalized_files)
+        return EvolutionPayload(desires=desires, files=normalized_files), None
 
-    return EvolutionPayload(desires=stripped, files=[])
+    return EvolutionPayload(desires=stripped, files=[]), None
 
 
 def _write_files(files: list[dict[str, str]], *, base_dir: Path) -> None:
