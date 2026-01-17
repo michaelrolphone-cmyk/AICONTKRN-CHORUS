@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Callable, Iterable
 
 from chorus.continuity import bootstrap_continuity
 from chorus.daemon import run_daemon
 from chorus.dialogue import run_dialogue_turn
-from chorus.evolution import run_evolution_loop
+from chorus.evolution import LmStudioRequestError, run_evolution_loop
 from chorus.expansion import materialize_expansion
 
 
@@ -72,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Polling interval in seconds.",
     )
     evolve.add_argument(
+        "--timeout",
+        type=float,
+        default=30.0,
+        help="Timeout in seconds for LM Studio requests.",
+    )
+    evolve.add_argument(
         "--max-iterations",
         type=int,
         default=None,
@@ -111,6 +118,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=12,
         help="Max interaction records to include in the prompt.",
+    )
+    dialogue.add_argument(
+        "--timeout",
+        type=float,
+        default=30.0,
+        help="Timeout in seconds for LM Studio requests.",
     )
     dialogue.add_argument("message", help="Message to send to CHORUS.")
 
@@ -217,24 +230,30 @@ def main(
             max_iterations=args.max_iterations,
             api_base=args.api_base,
             model=args.model,
+            timeout=args.timeout,
             bootstrap_path=args.bootstrap,
         )
         return 0
 
     if args.command == "dialogue":
         _require_paths(parser, args, include_session_log=True)
-        response = run_dialogue_turn(
-            args.message,
-            desires_path=args.desires_path,
-            ledger_path=args.ledger_path,
-            state_path=args.state_path,
-            session_log_path=args.session_log_path,
-            capsule_path=args.capsule_path,
-            history_limit=args.history_limit,
-            api_base=args.api_base,
-            model=args.model,
-            completion_provider=completion_provider,
-        )
+        try:
+            response = run_dialogue_turn(
+                args.message,
+                desires_path=args.desires_path,
+                ledger_path=args.ledger_path,
+                state_path=args.state_path,
+                session_log_path=args.session_log_path,
+                capsule_path=args.capsule_path,
+                history_limit=args.history_limit,
+                api_base=args.api_base,
+                model=args.model,
+                timeout=args.timeout,
+                completion_provider=completion_provider,
+            )
+        except LmStudioRequestError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         print(response)
         return 0
 

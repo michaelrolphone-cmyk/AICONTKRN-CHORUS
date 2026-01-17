@@ -10,6 +10,7 @@ import time
 import re
 from typing import Callable, Iterable, Sequence
 import types
+from urllib import error as url_error
 from urllib import request
 
 from chorus.continuity import record_interaction
@@ -23,6 +24,10 @@ class LmStudioConfig:
     temperature: float = 0.7
     max_tokens: int = 512
     timeout: float = 30.0
+
+
+class LmStudioRequestError(RuntimeError):
+    """Raised when the LM Studio request cannot be completed."""
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,7 @@ def run_evolution_loop(
     max_tokens: int = 512,
     interval: float = 60.0,
     max_iterations: int | None = None,
+    timeout: float = 30.0,
     bootstrap_path: str | Path | None = None,
     completion_provider: Callable[[list[dict[str, str]]], str] | None = None,
 ) -> list[EvolutionResult]:
@@ -58,6 +64,7 @@ def run_evolution_loop(
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
+        timeout=timeout,
     )
     if completion_provider is None:
         completion_provider = lambda messages: call_lm_studio_chat(config, messages)
@@ -194,8 +201,27 @@ def call_lm_studio_chat(config: LmStudioConfig, messages: Iterable[dict[str, str
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with request.urlopen(req, timeout=config.timeout) as response:
-        data = json.loads(response.read().decode("utf-8"))
+    try:
+        with request.urlopen(req, timeout=config.timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except TimeoutError as exc:
+        raise LmStudioRequestError(
+            (
+                "LM Studio request timed out after "
+                f"{config.timeout:.0f}s. "
+                "Confirm LM Studio is running and reachable at "
+                f"{_normalize_api_base(config.api_base)} or increase the timeout."
+            )
+        ) from exc
+    except url_error.URLError as exc:
+        raise LmStudioRequestError(
+            (
+                "LM Studio request failed. "
+                "Confirm LM Studio is running and reachable at "
+                f"{_normalize_api_base(config.api_base)}. "
+                f"Details: {exc.reason}"
+            )
+        ) from exc
     return _extract_chat_content(data)
 
 

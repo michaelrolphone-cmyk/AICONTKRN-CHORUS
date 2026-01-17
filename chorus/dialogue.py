@@ -33,6 +33,7 @@ def run_dialogue_turn(
     model: str = "local-model",
     temperature: float = 0.7,
     max_tokens: int = 512,
+    timeout: float = 30.0,
     completion_provider: Callable[[Iterable[dict[str, str]]], str] | None = None,
 ) -> str:
     if history_limit < 0:
@@ -52,6 +53,7 @@ def run_dialogue_turn(
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
+        timeout=timeout,
     )
     if completion_provider is None:
         completion_provider = lambda prompts: call_lm_studio_chat(
