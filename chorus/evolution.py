@@ -452,22 +452,62 @@ def _recover_payload_from_invalid_json(response: str) -> EvolutionPayload | None
 
 
 def _recover_desires_text(response: str) -> str | None:
-    match = re.search(r'"desires"\s*:\s*"(.*)', response, re.DOTALL)
+    match = re.search(r'"desires"\s*:', response)
     if not match:
         return None
-    raw = match.group(1).rstrip()
-    raw = re.sub(r'"\s*[,}]?\s*$', "", raw)
-    raw = raw.strip()
-    if not raw:
+    index = match.end()
+    while index < len(response) and response[index].isspace():
+        index += 1
+    if index >= len(response) or response[index] != "\"":
         return None
-    normalized = (
-        raw.replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\r", "\r")
-        .replace('\\"', '"')
-        .replace("\\\\", "\\")
-    )
-    return normalized.strip() or None
+    index += 1
+    buffer: list[str] = []
+    escape = False
+    while index < len(response):
+        char = response[index]
+        if escape:
+            if char == "n":
+                buffer.append("\n")
+            elif char == "t":
+                buffer.append("\t")
+            elif char == "r":
+                buffer.append("\r")
+            elif char == "b":
+                buffer.append("\b")
+            elif char == "f":
+                buffer.append("\f")
+            elif char in ("\\", "\"", "/"):
+                buffer.append(char)
+            elif char == "u" and index + 4 < len(response):
+                hex_value = response[index + 1 : index + 5]
+                if all(c in "0123456789abcdefABCDEF" for c in hex_value):
+                    buffer.append(chr(int(hex_value, 16)))
+                    index += 4
+                else:
+                    buffer.append("\\u")
+            else:
+                buffer.append("\\")
+                buffer.append(char)
+            escape = False
+            index += 1
+            continue
+        if char == "\\":
+            escape = True
+            index += 1
+            continue
+        if char == "\"":
+            probe = index + 1
+            while probe < len(response) and response[probe].isspace():
+                probe += 1
+            if probe >= len(response) or response[probe] in (",", "}"):
+                break
+            buffer.append(char)
+            index += 1
+            continue
+        buffer.append(char)
+        index += 1
+    recovered = "".join(buffer).strip()
+    return recovered or None
 
 
 def _normalize_desires_text(desires: str) -> str:
