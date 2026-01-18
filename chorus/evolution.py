@@ -53,6 +53,7 @@ def run_evolution_loop(
     max_iterations: int | None = None,
     timeout: float = 30.0,
     bootstrap_path: str | Path | None = None,
+    context_paths: Sequence[str | Path] | None = None,
     completion_provider: Callable[[list[dict[str, str]]], str] | None = None,
 ) -> list[EvolutionResult]:
     if interval <= 0:
@@ -100,6 +101,7 @@ def run_evolution_loop(
             current_desires,
             ledger_path=ledger_path,
             state_path=state_path,
+            context_paths=context_paths,
         )
         record_interaction(
             session_log_path,
@@ -257,9 +259,11 @@ def _build_messages(
     *,
     ledger_path: str | Path,
     state_path: str | Path,
+    context_paths: Sequence[str | Path] | None = None,
 ) -> list[dict[str, str]]:
     ledger_excerpt = _read_tail_lines(ledger_path, limit=5)
     state_payload = _read_json(state_path)
+    context_payload = _format_context_files(context_paths)
     user_content = (
         "Current desires markdown:\n"
         f"{current_desires or '[none]'}\n\n"
@@ -267,11 +271,13 @@ def _build_messages(
         f"{ledger_excerpt or '[none]'}\n\n"
         "Current state snapshot JSON:\n"
         f"{json.dumps(state_payload, indent=2, sort_keys=True) if state_payload else '[none]'}\n\n"
+        f"{context_payload}\n\n"
         "Update the desires markdown to reflect the next self-evolution steps. "
         "Return ONLY valid JSON with keys: "
         "`desires` (string markdown list) and optional `files` (list of "
         "{path, content} objects). Use paths relative to the desires file "
-        "directory. Do not include commentary or code fences."
+        "directory. When making code changes, include updated tests. "
+        "Do not include commentary or code fences."
     )
     return [
         {
@@ -351,6 +357,22 @@ def _read_json(path: str | Path) -> dict[str, object] | None:
     if not file_path.exists():
         return None
     return json.loads(file_path.read_text(encoding="utf-8"))
+
+
+def _format_context_files(context_paths: Sequence[str | Path] | None) -> str:
+    if not context_paths:
+        return "Context files: [none]"
+    sections: list[str] = ["Context files:"]
+    for context_path in context_paths:
+        file_path = Path(context_path)
+        if not file_path.exists():
+            sections.append(f"- {file_path}: [missing]")
+            continue
+        content = file_path.read_text(encoding="utf-8").strip()
+        if not content:
+            content = "[empty]"
+        sections.append(f"--- {file_path} ---\n{content}")
+    return "\n\n".join(sections)
 
 
 def _normalize_api_base(api_base: str) -> str:
