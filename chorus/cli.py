@@ -90,6 +90,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional bootstrap module path to reload each iteration.",
     )
+    evolve.add_argument(
+        "--context-path",
+        action="append",
+        type=Path,
+        default=[],
+        help="Optional file path to include in the evolution prompt (repeatable).",
+    )
 
     dialogue = subparsers.add_parser(
         "dialogue",
@@ -232,6 +239,7 @@ def main(
             model=args.model,
             timeout=args.timeout,
             bootstrap_path=args.bootstrap,
+            context_paths=args.context_path,
         )
         return 0
 

@@ -164,6 +164,39 @@ def test_evolution_loop_normalizes_unlisted_desire(tmp_path):
     assert contents.startswith("1) Unnumbered desire")
 
 
+def test_evolution_loop_includes_context_files(tmp_path):
+    desires_path = tmp_path / "desires.md"
+    desires_path.write_text("1) Start\nSeed.\n", encoding="utf-8")
+    ledger_path = tmp_path / "ledger.md"
+    state_path = tmp_path / "state.json"
+    session_log_path = tmp_path / "session.jsonl"
+    context_path = tmp_path / "context.txt"
+    context_path.write_text("context payload", encoding="utf-8")
+    captured = {}
+
+    def completion_provider(messages):
+        captured["messages"] = messages
+        return '{"desires": "1) Next Step\\nAdvance.\\n"}'
+
+    results = run_evolution_loop(
+        desires_path,
+        ledger_path=ledger_path,
+        state_path=state_path,
+        session_log_path=session_log_path,
+        source="test",
+        interval=0.01,
+        max_iterations=1,
+        context_paths=[context_path],
+        completion_provider=completion_provider,
+    )
+
+    assert [result.status for result in results] == ["updated"]
+    user_content = captured["messages"][-1]["content"]
+    assert "Context files:" in user_content
+    assert "context.txt" in user_content
+    assert "context payload" in user_content
+
+
 def test_evolution_loop_accepts_json_desires_list(tmp_path):
     desires_path = tmp_path / "desires.md"
     desires_path.write_text("1) Start\nSeed.\n", encoding="utf-8")
