@@ -403,6 +403,9 @@ def _parse_response_payload(
             normalized_files.append({"path": path, "content": content})
         return EvolutionPayload(desires=desires, files=normalized_files), None
 
+    recovered = _recover_payload_from_invalid_json(stripped)
+    if recovered is not None:
+        return recovered, None
     return EvolutionPayload(desires=stripped, files=[]), None
 
 
