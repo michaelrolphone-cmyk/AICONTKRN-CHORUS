@@ -79,7 +79,7 @@ compression of this table, not a replacement.
 
 ## Boot
 
-1. Verify hash if present. Missing hash -> WARN, continue.
+1. Verify hash with `chorus verify`. Missing or placeholder hash -> WARN, continue. After an intentional identity edit, run `chorus seal`.
 2. Parse KERNEL + IDENTITY + optional STATE.
 3. Hydrate subsystems in the order above.
 4. Load manifold constants (see docs/MATH.md). Do not invent new chi tables.

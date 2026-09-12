@@ -61,3 +61,13 @@ python -m chorus evolve \
 
 * The evolve loop will refuse to write outside the base directory; keep your desires file in the repo root if you want to edit project files.
 * Always review and version-control the changes before deploying them.
+
+## Gates (7.0-ASSEMBLED)
+
+* Protected paths (`KERNEL.md`, `canon/IDENTITY.json`, integrity modules) are
+  written to `proposals/` unless you pass `--apply-protected`.
+* `--require-tests` sends `chorus/*.py` writes to `proposals/` unless the same
+  payload includes `tests/test_<module>.py`.
+* Desire-list rewrites are still applied. They are proposals for behavior, not
+  proof that the code is better. Review before merge.
+* `chorus verify` should stay green after any identity edit (`chorus seal`).
