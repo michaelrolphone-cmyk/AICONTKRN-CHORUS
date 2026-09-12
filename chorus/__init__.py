@@ -17,6 +17,7 @@ from chorus.expansion import (
 )
 from chorus.ledger import Ledger, LedgerEntry
 from chorus.state import StateSnapshot, export_state
+from chorus.integrity import VerifyReport, seal_paths, verify_paths
 
 __all__ = [
     "Desire",
@@ -36,4 +37,7 @@ __all__ = [
     "parse_desires",
     "run_dialogue_turn",
     "record_interaction",
+    "VerifyReport",
+    "seal_paths",
+    "verify_paths",
 ]
