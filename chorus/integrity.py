@@ -59,11 +59,7 @@ def payload_digest(*, kernel: bytes, identity_raw: str | bytes) -> str:
 
 
 def read_recorded_digest(identity_raw: str | bytes) -> str | None:
-    text = identity_raw.decode("utf-8") if isinstance(raw := identity_raw, bytes) else identity_raw
-    if isinstance(identity_raw, bytes):
-        text = identity_raw.decode("utf-8")
-    else:
-        text = identity_raw
+    text = identity_raw.decode("utf-8") if isinstance(identity_raw, bytes) else identity_raw
     data = json.loads(text)
     recorded = data.get("sha256")
     if not isinstance(recorded, str) or not recorded or recorded == PLACEHOLDER:
