@@ -12,6 +12,7 @@ from chorus.daemon import run_daemon
 from chorus.dialogue import run_dialogue_turn
 from chorus.evolution import LmStudioRequestError, run_evolution_loop
 from chorus.expansion import materialize_expansion
+from chorus.integrity import seal_paths, verify_paths
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,6 +98,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Optional file path to include in the evolution prompt (repeatable).",
     )
+    evolve.add_argument(
+        "--apply-protected",
+        action="store_true",
+        help="Allow evolve to overwrite KERNEL/IDENTITY and other protected files.",
+    )
+    evolve.add_argument(
+        "--require-tests",
+        action="store_true",
+        help="Redirect chorus/*.py writes to proposals/ unless a paired tests/test_*.py is included.",
+    )
 
     dialogue = subparsers.add_parser(
         "dialogue",
@@ -133,6 +144,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Timeout in seconds for LM Studio requests.",
     )
     dialogue.add_argument("message", help="Message to send to CHORUS.")
+
+    verify = subparsers.add_parser(
+        "verify",
+        help="Verify KERNEL.md + canon/IDENTITY.json payload hash.",
+    )
+    verify.add_argument("--kernel-path", type=Path, default=None)
+    verify.add_argument("--identity-path", type=Path, default=None)
+    verify.add_argument("--root", type=Path, default=None, help="Repo root containing KERNEL.md")
+
+    seal = subparsers.add_parser(
+        "seal",
+        help="Write computed sha256 into IDENTITY.json and canon/INTEGRITY.sha256.",
+    )
+    seal.add_argument("--kernel-path", type=Path, default=None)
+    seal.add_argument("--identity-path", type=Path, default=None)
+    seal.add_argument("--root", type=Path, default=None)
 
     return parser
 
@@ -240,6 +267,8 @@ def main(
             timeout=args.timeout,
             bootstrap_path=args.bootstrap,
             context_paths=args.context_path,
+            apply_protected=args.apply_protected,
+            require_tests=args.require_tests,
         )
         return 0
 
@@ -263,6 +292,27 @@ def main(
             print(str(exc), file=sys.stderr)
             return 1
         print(response)
+        return 0
+
+    if args.command == "verify":
+        report = verify_paths(args.kernel_path, args.identity_path, root=args.root)
+        if report.ok:
+            print(f"VERIFY ok {report.digest}")
+            return 0
+        print("VERIFY fail", file=sys.stderr)
+        print(f"computed {report.digest or '[none]'}", file=sys.stderr)
+        print(f"recorded {report.recorded or '[none]'}", file=sys.stderr)
+        for issue in report.issues:
+            print(f"- {issue}", file=sys.stderr)
+        return 1
+
+    if args.command == "seal":
+        report = seal_paths(args.kernel_path, args.identity_path, root=args.root)
+        print(f"SEAL {report.digest}")
+        if not report.ok:
+            for issue in report.issues:
+                print(f"- {issue}", file=sys.stderr)
+            return 1
         return 0
 
     raise ValueError(f"Unhandled command: {args.command}")
