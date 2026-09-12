@@ -16,6 +16,15 @@ from urllib import request
 from chorus.continuity import record_interaction
 from chorus.expansion import materialize_expansion, parse_desires
 from chorus.gates import has_paired_test, is_code, is_protected, needs_paired_test, proposal_path
+from chorus.evolution_support import (
+    _apply_response,
+    _format_context_files,
+    _maybe_run_bootstrap,
+    _normalize_api_base,
+    _read_json,
+    _read_tail_lines,
+    _read_text,
+)
 
 
 @dataclass(frozen=True)
